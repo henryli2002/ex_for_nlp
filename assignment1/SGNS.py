@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -46,7 +47,7 @@ context_tensor = torch.tensor(context_words, dtype=torch.long)
 
 # 创建TensorDataset和DataLoader
 dataset = TensorDataset(input_tensor, context_tensor)
-dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
+dataloader = DataLoader(dataset, batch_size=256, shuffle=True)
 
 vocab_size, embedding_dim = len(words_dict), 100
 model = SkipGramModel(vocab_size, embedding_dim).to(device)  # 模型实例
@@ -54,10 +55,11 @@ loss_function = nn.NLLLoss()  # 损失函数
 num_epochs = 10
 optimizer = optim.SGD(model.parameters(), lr=0.01)  # 优化器
 
-# 训练模型
 for epoch in range(num_epochs):
     total_loss = 0
-    for input_batch, context_batch in dataloader:
+    # 使用tqdm创建进度条
+    progress_bar = tqdm(enumerate(dataloader), total=len(dataloader), desc=f'Epoch {epoch}')
+    for i, (input_batch, context_batch) in progress_bar:
         # 移动到设备
         input_batch = input_batch.to(device)
         context_batch = context_batch.to(device)
@@ -76,8 +78,16 @@ for epoch in range(num_epochs):
         optimizer.step()
 
         total_loss += loss.item()
+        
+        # 每隔10000个批次打印一次当前平均损失
+        if (i + 1) % 10000 == 0:
+            avg_loss = total_loss / (i + 1)
+            print(f"  Batch {i+1}, Avg. Loss: {avg_loss:.4f}")
+            # 也可以将信息更新到tqdm的进度条上
+            progress_bar.set_postfix(avg_loss=f"{avg_loss:.4f}")
     
-    print(f"Epoch {epoch}, Loss: {total_loss}")
+    # 每个epoch结束时打印总损失
+    print(f"Epoch {epoch}, Total Loss: {total_loss:.4f}")
 
 
 # 保存模型
