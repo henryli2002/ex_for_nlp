@@ -38,6 +38,23 @@ U_reduced = U[:, :k]
 S_reduced = S[:k]
 V_reduced = V[:, :k]
 
+# 计算非0奇异值的数量
+non_zero_singular_values = torch.sum(S > 0).item()
+
+# 选取的奇异值之和
+sum_selected_singular_values = torch.sum(S[:k]).item()
+
+# 全部奇异值之和
+sum_all_singular_values = torch.sum(S).item()
+
+# 二者的比例
+ratio = sum_selected_singular_values / sum_all_singular_values
+
+print(f"非零奇异值的数量: {non_zero_singular_values}")
+print(f"选取的前{k}个奇异值之和: {sum_selected_singular_values:.4f}")
+print(f"全部奇异值之和: {sum_all_singular_values:.4f}")
+print(f"选取的奇异值之和与全部奇异值之和的比例: {ratio:.4f}")
+
 # 计算降维后的数据矩阵
 vec_sta = torch.matmul(U_reduced, torch.diag(S_reduced))
 
