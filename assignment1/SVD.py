@@ -22,18 +22,18 @@ with open(numerical_list_path, 'r', encoding='utf-8') as file:
 
 # 用tensor类型的数据来加速计算
 vocab_size = len(words_dict)
-vocab_matrix = torch.zeros((vocab_size, vocab_size)).float().to(device)
+vocab_matrix = torch.zeros((vocab_size, vocab_size)).to(device)
 
 # 制作共现矩阵,设窗口大小为K
 K = 5
 for i, word in enumerate(numerical_list):
     for j in range(max(i-K, 0), min(i+K, len(numerical_list))):
-        if numerical_list[j] != word:
+        if numerical_list[j] != word and numerical_list[j] != -1:
             vocab_matrix[word, numerical_list[j]] += 1
 
 # SVD降维
-U, S, V = torch.linalg.svd(vocab_matrix, full_matrices=False)
-k = int(1000)  # 降维到N维
+U, S, V = torch.linalg.svd(vocab_matrix.float(), full_matrices=False)
+k = int(100)  # 降维到N维
 U_reduced = U[:, :k]
 S_reduced = S[:k]
 V_reduced = V[:, :k]
@@ -48,7 +48,7 @@ with open('./data/wordsim353_agreed.txt', 'r', encoding='utf-8') as file:
         sim_svd = 0
         words = line.strip().split()
         if words[1] in words_dict and words[2] in words_dict:
-            sim_svd = F.cosine_similarity(vec_sta[words_dict[words[1]]], vec_sta[words_dict[words[2]]]).cpu()
+            sim_svd = F.cosine_similarity(vec_sta[words_dict[words[1]]].unsqueeze(0), vec_sta[words_dict[words[2]]].unsqueeze(0)).cpu().numpy()
         modified_line = line.rstrip('\n') + f'\t{sim_svd}\n'
         modified_lines.append(modified_line) 
         

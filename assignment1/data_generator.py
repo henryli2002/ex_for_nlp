@@ -15,7 +15,7 @@ filtered_stopwords = [word for word in words_list if word not in english_stopwor
 
 # 计算词频去掉过低频词
 words_counts = Counter(filtered_stopwords)
-min_freq = 10
+min_freq = 100
 filtered_words = [word for word in filtered_stopwords if min_freq <= words_counts[word]]
 
 # 去除重复词得到词库的字典
@@ -27,7 +27,7 @@ for word in filtered_words:
         i += 1
 
 # 将词转换为相应的数字
-numerical_list = [words_dict[word] for word in filtered_words]
+numerical_list = [words_dict[word] if word in words_dict else -1 for word in filtered_stopwords]
 
 # 保存过滤后的词列表到文件
 with open('./data/numerical_list.txt', 'w', encoding='utf-8') as file:
@@ -43,9 +43,11 @@ with open('./data/words_dict.txt', 'w', encoding='utf-8') as file:
 # 用于生成SGNS的训练集
 def generate_training_data(words_list, context_window):
     for center in range(len(words_list)):
+        if words_list[center] == -1:
+            continue
         for context in range(-context_window, context_window + 1):
             context_index = center + context
-            if context_index < 0 or context_index >= len(words_list) or center == context_index:
+            if context_index < 0 or context_index >= len(words_list) or center == context_index or words_list[context_index] == -1:
                 continue
             yield words_list[center], words_list[context_index]
 

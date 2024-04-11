@@ -48,7 +48,7 @@ context_tensor = torch.tensor(context_words, dtype=torch.long)
 dataset = TensorDataset(input_tensor, context_tensor)
 dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
 
-vocab_size, embedding_dim = len(words_dict), 1000
+vocab_size, embedding_dim = len(words_dict), 100
 model = SkipGramModel(vocab_size, embedding_dim).to(device)  # 模型实例
 loss_function = nn.NLLLoss()  # 损失函数
 num_epochs = 10
@@ -126,7 +126,7 @@ with torch.no_grad():
 # 创建相似度字典，键为(词1, 词2)对，值为相似度
 sim_dict = {pair: sim for pair, sim in zip(word_pairs, similarities)}
 
-# 写入
+# 写入sim_sgns
 with open('./output/sgns_output.txt', 'w', encoding='utf-8') as file:
     for line in lines:
         words = line.split()
