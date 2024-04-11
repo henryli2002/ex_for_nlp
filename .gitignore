@@ -1,0 +1,4 @@
+*.pth
+SVD_SGNS/data/numerical_list.txt
+SVD_SGNS/data/sgns_training_data.txt
+SVD_SGNS/data/words_dict.txt
