@@ -79,3 +79,7 @@
 (2) https://github.com/theeluwin/pytorch-sgns
 
 (3) https://github.com/fanglanting/skip-gram-pytorch
+
+# 说明
+python data_generator.py
+得到数据，运行SVD和SGNS得到两者的数据用merge.py合成一个
