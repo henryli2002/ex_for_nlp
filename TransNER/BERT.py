@@ -1,18 +1,18 @@
-from transformers import BertTokenizer, BertModel
+from transformers import BertTokenizer, BertForTokenClassification
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 # 图像处理部分
 from sklearn.metrics import confusion_matrix
-from sklearn.metrics import f1_score, recall_score
+from sklearn.metrics import f1_score, recall_score, precision_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
 # 定义训练的参数
 num_epochs = 10
-batch_size = 64
+batch_size = 32
 learning_rate = 5e-5
 max_length = 100
 num_labels = 6
@@ -25,51 +25,48 @@ tokenizer = BertTokenizer.from_pretrained(
 
 
 # 训练函数
-def train(model, data_loader, optimizer, device, loss_fn=None):
-    """训练模型的函数
-    参数:
-    model: 要训练的模型
-    data_loader: 数据加载器
-    optimizer: 优化器
-    device: 设备（CPU或CUDA）
-    loss_fn: 损失函数（可选，如果模型内部已定义，则不需要，目前还没有实现）
-    """
+def train(model, data_loader, optimizer, device, loss_fn=torch.nn.CrossEntropyLoss()):
     model.train()
     total_loss = 0.0
     progress_bar = tqdm(enumerate(data_loader), total=len(data_loader))
     for step, batch in progress_bar:
-        batch = [item.to(device) for item in batch]  # 将数据移动到指定设备
-        input_ids, token_type_ids, attention_mask, labels = batch  # 解包数据
+        input_ids, attention_mask, labels = [item.to(device) for item in batch]
+        optimizer.zero_grad()
+        
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        logits = outputs.logits
 
-        optimizer.zero_grad()  # 清空梯度
-        outputs = model(
-            input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids
-        )
-        loss = outputs.loss  # 获取损失
-        loss.backward()  # 反向传播
-        optimizer.step()  # 更新参数
+        # 忽略attention_mask为0的位置和labels为-1的位置
+        active_loss = attention_mask.view(-1) == 1
+        active_labels = labels.view(-1)
+        active_loss = active_loss & (active_labels != -1) 
+        active_logits = logits.view(-1, logits.shape[-1])[active_loss]
+        active_labels = active_labels[active_loss]
 
-        total_loss += loss.item()
-        if step % 100 == 0:
-            print(f"Step {step}: Loss = {loss.item():.4f}")
+        if len(active_labels) > 0:  # 仅当有有效的标签时才计算损失
+            loss = loss_fn(active_logits, active_labels)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+            progress_bar.set_description(f"Step {step}: Loss = {loss.item():.4f}")
 
     avg_loss = total_loss / len(data_loader)
     print(f"Average loss: {avg_loss:.4f}")
 
 
 # 测试函数
-def test(model, data_loader, device, dev=False):
+def test(model, data_loader, device, ignore_index=-1):
     """测试模型的函数
     参数:
     model: 要测试的模型
     data_loader: 数据加载器
     device: 设备（CPU或CUDA）
-    dev: 是否是验证模式
+    ignore_index: 应该被忽略的标签索引，通常是填充标签
     """
     model.eval()
     total_loss = 0
-    labels_list = []
-    results_list = []  # 用于收集预测结果
+    true_labels = []
+    predictions_list = []  # 用于收集预测结果
     progress_bar = tqdm(enumerate(data_loader), total=len(data_loader))
     with torch.no_grad():
         for step, batch in progress_bar:
@@ -80,45 +77,30 @@ def test(model, data_loader, device, dev=False):
                 input_ids,
                 attention_mask=attention_mask,
                 token_type_ids=token_type_ids,
-                labels=labels.to(torch.int64),
+                labels=labels
             )
             loss = outputs.loss
             total_loss += loss.item()
 
             logits = outputs.logits
             predictions = torch.argmax(logits, dim=-1)
-            if bi_class:
-                # 将标签映射为二分类问题
-                binary_labels = (labels >= 3).to(torch.int64)
-                binary_predictions = (predictions >= 3).to(torch.int64)
-
-                labels_list.extend(binary_labels.cpu().numpy())
-                results_list.extend(binary_predictions.cpu().numpy())
-            else:
-                labels_list.extend(labels.cpu().numpy())
-                results_list.extend(predictions.cpu().numpy())
-    if bi_class:
-        avg_loss = total_loss / len(data_loader)
-        accuracy = (np.array(labels_list) == np.array(results_list)).mean()
-        f1 = f1_score(labels_list, results_list, average="binary")  # 计算加权F1分数
-        recall = recall_score(
-            labels_list, results_list, average="binary"
-        )  # 计算加权召回率
-    else:
-        avg_loss = total_loss / len(data_loader)
-        accuracy = (np.array(labels_list) == np.array(results_list)).mean()
-        f1 = f1_score(labels_list, results_list, average="weighted")  # 计算加权F1分数
-        recall = recall_score(
-            labels_list, results_list, average="weighted"
-        )  # 计算加权召回率
+            
+            # 处理有效的标签和预测（忽略ignore_index）
+            active_positions = labels != ignore_index
+            true_labels.extend(labels[active_positions].cpu().numpy())
+            predictions_list.extend(predictions[active_positions].cpu().numpy())
+    
+    avg_loss = total_loss / len(data_loader)
+    precision = precision_score(true_labels, predictions_list, average="weighted", zero_division=0)
+    recall = recall_score(true_labels, predictions_list, average="weighted", zero_division=0)
+    f1 = f1_score(true_labels, predictions_list, average="weighted", zero_division=0)
 
     print(
-        f"Test Loss: {avg_loss:.4f}, Accuracy: {accuracy:.4f}, F1 Score: {f1:.4f}, Recall: {recall:.4f}"
+        f"Test Loss: {avg_loss:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}"
     )
 
-    if dev == True:
-        return accuracy
-    return labels_list, results_list
+    return true_labels, predictions_list
+
 
 
 # 绘制图像
@@ -147,9 +129,6 @@ def plot_metrics(labels, predictions, num_classes=6):
     plt.show()
 
 
-# 数据编码
-
-
 # encoder
 def prepare_data(data_path, label_path, labels_dict):
     """对文本数据进行编码的函数
@@ -157,9 +136,11 @@ def prepare_data(data_path, label_path, labels_dict):
 
     """
     data = []
+    labels = []
+
     with open(data_path, "r", encoding="utf-8") as file:
         for line in file:
-            line = line.strip().split
+            line = " ".join(line.strip().split())
             data.append(line)
 
     encoded_data = tokenizer.batch_encode_plus(
@@ -168,19 +149,32 @@ def prepare_data(data_path, label_path, labels_dict):
         truncation=True,
         padding="max_length",
         max_length=max_length,
+        return_token_type_ids=False,
         return_tensors="pt",
     )
 
-    labels = []
     with open(label_path, "r", encoding="utf-8") as file:
-        for line in file:
-            line = line.strip().split()
-            label = []
-            for i in line:
-                label.append(labels_dict[i])
-            labels.append(label)
+        for line, encoding in zip(file, encoded_data['input_ids']):
+            line_labels = line.strip().split()
+            label_ids = [labels_dict.get(label, -1) for label in line_labels]
 
-    return encoded_data, labels
+            # 处理特殊标记：为[CLS]标记添加-1
+            label_ids = [-1] + label_ids
+
+            # 为每个[SEP]标记添加-1
+            sep_positions = (encoding == tokenizer.sep_token_id).nonzero()
+            for pos in reversed(sep_positions):
+                label_ids.insert(pos.item(), -1)
+
+            # 截断和填充逻辑
+            label_ids = label_ids[:max_length]
+            label_ids += [-1] * (max_length - len(label_ids))
+
+            labels.append(label_ids)
+
+    labels_tensor = torch.tensor(labels, dtype=torch.long)
+
+    return encoded_data, labels_tensor
 
 
 # 主函数
@@ -192,18 +186,27 @@ def main():
             line = line.strip().split()
             labels_set.update(line)
     labels_dict = {label: idx for idx, label in enumerate(sorted(labels_set))}
-    print(labels_dict)
     train_path = "data/train.txt"
     train_TAG_path = "data/train_TAG.txt"
     train_data, train_labels = prepare_data(train_path, train_TAG_path, labels_dict)
 
-    print(train_data[1], train_labels[1])
+    # 打印输入数据的键和形状
+    print("Encoded data shapes:")
+    for key, value in train_data.items():
+        print(f"{key}: {value.shape}")
 
-    dataset = TensorDataset(train_data, train_labels)
+    # 打印标签数据的形状
+    print("Labels shape:", train_labels.shape)
+
+    dataset = TensorDataset(
+            train_data['input_ids'], 
+            train_data['attention_mask'], 
+            train_labels
+        )
     data_loader = DataLoader(dataset, batch_size=batch_size)
 
     # 模型、优化器和损失函数的准备
-    model = BertModel.from_pretrained("bert-base-chinese")
+    model = BertForTokenClassification.from_pretrained("bert-base-chinese", num_labels=len(labels_dict))
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -221,12 +224,14 @@ def main():
     for epoch in range(num_epochs):
         ac = 0
         model.load_state_dict(torch.load(f"./models/model_{epoch}e.pth"))
-        dev_data, dev_labels = encoder(df_dev)
+        dev_path = "data/dev.txt"
+        dev_TAG_path = "data/dev_TAG.txt"
+        dev_data, dev_labels = prepare_data(dev_path, dev_TAG_path, labels_dict)
+
         dev_dataset = TensorDataset(
             dev_data["input_ids"],
-            dev_data["token_type_ids"],
             dev_data["attention_mask"],
-            torch.Tensor(dev_labels),
+            dev_labels,
         )
         dev_data_loader = DataLoader(dev_dataset, batch_size=batch_size)
         ac = test(model, dev_data_loader, device, dev=True)
