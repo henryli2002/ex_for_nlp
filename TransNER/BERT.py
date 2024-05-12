@@ -1,6 +1,6 @@
 from transformers import BertTokenizer, BertForTokenClassification
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, SubsetRandomSampler
 from tqdm import tqdm
 
 # 图像处理部分
@@ -9,9 +9,12 @@ from sklearn.metrics import f1_score, recall_score, precision_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import pandas as pd
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 # 定义训练的参数
-num_epochs = 10
+num_epochs = 100
 batch_size = 32
 learning_rate = 5e-5
 max_length = 100
@@ -25,7 +28,7 @@ tokenizer = BertTokenizer.from_pretrained(
 
 
 # 训练函数
-def train(model, data_loader, optimizer, device, loss_fn=torch.nn.CrossEntropyLoss()):
+def train(model, data_loader, optimizer, device, loss_fn=torch.nn.CrossEntropyLoss(ignore_index=-1)):
     model.train()
     total_loss = 0.0
     progress_bar = tqdm(enumerate(data_loader), total=len(data_loader))
@@ -54,38 +57,27 @@ def train(model, data_loader, optimizer, device, loss_fn=torch.nn.CrossEntropyLo
     print(f"Average loss: {avg_loss:.4f}")
 
 
-# 测试函数
 def test(model, data_loader, device, ignore_index=-1):
-    """测试模型的函数
-    参数:
-    model: 要测试的模型
-    data_loader: 数据加载器
-    device: 设备（CPU或CUDA）
-    ignore_index: 应该被忽略的标签索引，通常是填充标签
-    """
     model.eval()
     total_loss = 0
     true_labels = []
-    predictions_list = []  # 用于收集预测结果
+    predictions_list = []  
+    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=ignore_index)  
     progress_bar = tqdm(enumerate(data_loader), total=len(data_loader))
     with torch.no_grad():
         for step, batch in progress_bar:
             batch = [item.to(device) for item in batch]
-            input_ids, token_type_ids, attention_mask, labels = batch
+            input_ids, attention_mask, labels = batch
 
-            outputs = model(
-                input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
-                labels=labels
-            )
-            loss = outputs.loss
-            total_loss += loss.item()
-
+            outputs = model(input_ids, attention_mask=attention_mask)
             logits = outputs.logits
             predictions = torch.argmax(logits, dim=-1)
-            
-            # 处理有效的标签和预测（忽略ignore_index）
+
+            # 只计算有效的损失
+            loss = loss_fn(logits.view(-1, logits.shape[-1]), labels.view(-1))
+            total_loss += loss.item()
+
+            # 忽略 ignore_index 的位置
             active_positions = labels != ignore_index
             true_labels.extend(labels[active_positions].cpu().numpy())
             predictions_list.extend(predictions[active_positions].cpu().numpy())
@@ -99,34 +91,7 @@ def test(model, data_loader, device, ignore_index=-1):
         f"Test Loss: {avg_loss:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}"
     )
 
-    return true_labels, predictions_list
-
-
-
-# 绘制图像
-def plot_metrics(labels, predictions, num_classes=6):
-    # 绘制混淆矩阵
-    cm = confusion_matrix(labels, predictions, labels=range(num_classes))
-    plt.figure(figsize=(10, 7))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
-    plt.title("Confusion Matrix")
-    plt.ylabel("True Label")
-    plt.xlabel("Predicted Label")
-    plt.savefig(f"./pic/Confusion_Matrix_{num_classes}.png")
-    plt.show()
-
-    # 绘制标签和预测的分布柱状图
-    labels_df = pd.DataFrame({"Labels": labels, "Category": "True"})
-    predictions_df = pd.DataFrame({"Labels": predictions, "Category": "Predicted"})
-    combined_df = pd.concat([labels_df, predictions_df])
-
-    plt.figure(figsize=(10, 6))
-    sns.countplot(data=combined_df, x="Labels", hue="Category")
-    plt.title("Distribution of True Labels vs Predictions")
-    plt.xlabel("Label")
-    plt.ylabel("Count")
-    plt.savefig(f"./pic/Distribution_{num_classes}.png")
-    plt.show()
+    return precision, true_labels, predictions_list
 
 
 # encoder
@@ -177,6 +142,32 @@ def prepare_data(data_path, label_path, labels_dict):
     return encoded_data, labels_tensor
 
 
+# 绘制图像
+def plot_metrics(labels, predictions, num_classes=8):
+    # 绘制混淆矩阵
+    cm = confusion_matrix(labels, predictions, labels=range(num_classes))
+    plt.figure(figsize=(10, 7))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
+    plt.title("Confusion Matrix")
+    plt.ylabel("True Label")
+    plt.xlabel("Predicted Label")
+    plt.savefig(f"./pic/Confusion_Matrix_{num_classes}.png")
+    plt.show()
+
+    # 绘制标签和预测的分布柱状图
+    labels_df = pd.DataFrame({"Labels": labels, "Category": "True"})
+    predictions_df = pd.DataFrame({"Labels": predictions, "Category": "Predicted"})
+    combined_df = pd.concat([labels_df, predictions_df])
+
+    plt.figure(figsize=(10, 6))
+    sns.countplot(data=combined_df, x="Labels", hue="Category")
+    plt.title("Distribution of True Labels vs Predictions")
+    plt.xlabel("Label")
+    plt.ylabel("Count")
+    plt.savefig(f"./pic/Distribution_{num_classes}.png")
+    plt.show()
+
+
 # 主函数
 def main():
     # 数据准备
@@ -186,24 +177,41 @@ def main():
             line = line.strip().split()
             labels_set.update(line)
     labels_dict = {label: idx for idx, label in enumerate(sorted(labels_set))}
-    train_path = "data/train.txt"
-    train_TAG_path = "data/train_TAG.txt"
-    train_data, train_labels = prepare_data(train_path, train_TAG_path, labels_dict)
+    print(labels_dict)
+    # train_path = "data/train.txt"
+    # train_TAG_path = "data/train_TAG.txt"
+    # train_data, train_labels = prepare_data(train_path, train_TAG_path, labels_dict)
 
-    # 打印输入数据的键和形状
-    print("Encoded data shapes:")
-    for key, value in train_data.items():
-        print(f"{key}: {value.shape}")
+    # # 打印输入数据的键和形状
+    # print("Encoded data shapes:")
+    # for key, value in train_data.items():
+    #     print(f"{key}: {value.shape}")
 
-    # 打印标签数据的形状
-    print("Labels shape:", train_labels.shape)
+    # # 打印标签数据的形状
+    # print("Labels shape:", train_labels.shape)
 
-    dataset = TensorDataset(
-            train_data['input_ids'], 
-            train_data['attention_mask'], 
-            train_labels
-        )
-    data_loader = DataLoader(dataset, batch_size=batch_size)
+    # dataset = TensorDataset(
+    #         train_data['input_ids'], 
+    #         train_data['attention_mask'], 
+    #         train_labels
+    #     )
+    
+    # dataset_size = len(dataset)
+
+    # subset_size = int(0.01 * dataset_size)
+
+
+    # indices = list(range(dataset_size))
+
+    # np.random.shuffle(indices)
+
+    # subset_indices = indices[:subset_size]
+
+    # sampler = SubsetRandomSampler(subset_indices)
+
+    # data_loader = DataLoader(dataset, batch_size=batch_size, sampler=sampler)
+    
+
 
     # 模型、优化器和损失函数的准备
     model = BertForTokenClassification.from_pretrained("bert-base-chinese", num_labels=len(labels_dict))
@@ -212,15 +220,16 @@ def main():
 
     # 训练过程
     model.to(device)
-    for epoch in range(num_epochs):
-        print(f"Epoch {epoch+1}/{num_epochs}")
-        train(model=model, data_loader=data_loader, optimizer=optimizer, device=device)
-        # 保存和加载模型，此处需要手动改模型路径
-        torch.save(model.state_dict(), f"./models/model_{epoch}e.pth")
+    # for epoch in range(num_epochs):
+    #     print(f"Epoch {epoch+1}/{num_epochs}")
+    #     train(model=model, data_loader=data_loader, optimizer=optimizer, device=device)
+    #     # 保存和加载模型，此处需要手动改模型路径
+    #     torch.save(model.state_dict(), f"./models/model_{epoch}e.pth")
 
     # 验证过程
     best_ac = 0  # 记录最高值
     best_epoch = 0  # 记录最好epoch
+    accuracy_per_epoch = []
     for epoch in range(num_epochs):
         ac = 0
         model.load_state_dict(torch.load(f"./models/model_{epoch}e.pth"))
@@ -234,11 +243,36 @@ def main():
             dev_labels,
         )
         dev_data_loader = DataLoader(dev_dataset, batch_size=batch_size)
-        ac = test(model, dev_data_loader, device, dev=True)
+        ac, true_labels, predictions_list = test(model, dev_data_loader, device)
+        accuracy_per_epoch.append(ac)
         if ac > best_ac:
             best_ac = ac
             best_epoch = epoch
         print(f"best_epoch:{best_epoch}")
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(accuracy_per_epoch, marker='o', linestyle='-', color='b')
+    plt.title('Accuracy over Epochs')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.grid(True)
+    plt.xticks(range(num_epochs), [f"Epoch {i+1}" for i in range(num_epochs)]) 
+    plt.savefig("./pic/accuracy_over_epochs.png")
+    plt.show()
+
+    model.load_state_dict(torch.load(f"./models/model_{best_epoch}e.pth"))
+    test_path = "data/test.txt"
+    test_TAG_path = "data/test_TAG.txt"
+    test_data, test_labels = prepare_data(test_path, test_TAG_path, labels_dict)
+
+    test_dataset = TensorDataset(
+        test_data["input_ids"],
+        test_data["attention_mask"],
+        test_labels,
+    )
+    test_data_loader = DataLoader(test_dataset, batch_size=batch_size)
+    ac, true_labels, predictions_list = test(model, test_data_loader, device)
+    plot_metrics(true_labels, predictions_list, num_classes=len(labels_dict)) 
 
 
 if __name__ == "__main__":
