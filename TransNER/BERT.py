@@ -226,41 +226,42 @@ def main():
     #     # 保存和加载模型，此处需要手动改模型路径
     #     torch.save(model.state_dict(), f"./models/model_{epoch}e.pth")
 
-    # 验证过程
-    best_ac = 0  # 记录最高值
-    best_epoch = 0  # 记录最好epoch
-    accuracy_per_epoch = []
-    for epoch in range(num_epochs):
-        ac = 0
-        model.load_state_dict(torch.load(f"./models/model_{epoch}e.pth"))
-        dev_path = "data/dev.txt"
-        dev_TAG_path = "data/dev_TAG.txt"
-        dev_data, dev_labels = prepare_data(dev_path, dev_TAG_path, labels_dict)
+    # # 验证过程
+    # best_ac = 0  # 记录最高值
+    # best_epoch = 0  # 记录最好epoch
+    # accuracy_per_epoch = []
+    # for epoch in range(num_epochs):
+    #     ac = 0
+    #     model.load_state_dict(torch.load(f"./models/model_{epoch}e.pth"))
+    #     dev_path = "data/dev.txt"
+    #     dev_TAG_path = "data/dev_TAG.txt"
+    #     dev_data, dev_labels = prepare_data(dev_path, dev_TAG_path, labels_dict)
 
-        dev_dataset = TensorDataset(
-            dev_data["input_ids"],
-            dev_data["attention_mask"],
-            dev_labels,
-        )
-        dev_data_loader = DataLoader(dev_dataset, batch_size=batch_size)
-        ac, true_labels, predictions_list = test(model, dev_data_loader, device)
-        accuracy_per_epoch.append(ac)
-        if ac > best_ac:
-            best_ac = ac
-            best_epoch = epoch
-        print(f"best_epoch:{best_epoch}")
+    #     dev_dataset = TensorDataset(
+    #         dev_data["input_ids"],
+    #         dev_data["attention_mask"],
+    #         dev_labels,
+    #     )
+    #     dev_data_loader = DataLoader(dev_dataset, batch_size=batch_size)
+    #     ac, true_labels, predictions_list = test(model, dev_data_loader, device)
+    #     accuracy_per_epoch.append(ac)
+    #     if ac > best_ac:
+    #         best_ac = ac
+    #         best_epoch = epoch
+    #     print(f"best_epoch:{best_epoch}")
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(accuracy_per_epoch, marker='o', linestyle='-', color='b')
-    plt.title('Accuracy over Epochs')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.grid(True)
-    plt.xticks(range(num_epochs), [f"Epoch {i+1}" for i in range(num_epochs)]) 
-    plt.savefig("./pic/accuracy_over_epochs.png")
-    plt.show()
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(accuracy_per_epoch, marker='o', linestyle='-', color='b')
+    # plt.title('Accuracy over Epochs')
+    # plt.xlabel('Epoch')
+    # plt.ylabel('Accuracy')
+    # plt.grid(True)
+    # plt.xticks(range(num_epochs), [f"Epoch {i+1}" for i in range(num_epochs)]) 
+    # plt.savefig("./pic/accuracy_over_epochs.png")
+    # plt.show()
 
-    model.load_state_dict(torch.load(f"./models/model_{best_epoch}e.pth"))
+    # model.load_state_dict(torch.load(f"./models/model_{best_epoch}e.pth"))
+    model.load_state_dict(torch.load(f"./models/model_{38}e.pth"))
     test_path = "data/test.txt"
     test_TAG_path = "data/test_TAG.txt"
     test_data, test_labels = prepare_data(test_path, test_TAG_path, labels_dict)
